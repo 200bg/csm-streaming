@@ -1,9 +1,9 @@
 import asyncio
 import os
 os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"  
-os.environ["CUDA_LAUNCH_BLOCKING"] = "1" 
-os.environ["PYTORCH_DISABLE_CUDA_GRAPHS"] = "1"  
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+os.environ["PYTORCH_DISABLE_CUDA_GRAPHS"] = "1"
 import platform
 import sqlite3
 import time
@@ -26,7 +26,7 @@ from sqlalchemy.orm import sessionmaker
 from typing import Optional
 from generator import Segment, load_csm_1b_local
 from llm_interface import LLMInterface
-from rag_system import RAGSystem 
+from rag_system import RAGSystem
 from vad import AudioStreamProcessor
 from pydantic import BaseModel
 import logging
@@ -34,7 +34,7 @@ from config import ConfigManager
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 import re
 speaking_start_time = 0.0          # set every time the AI begins a new turn
-MIN_BARGE_LATENCY   = 0.9   
+MIN_BARGE_LATENCY   = 0.9
 speaker_counters = {
     0: 0,  # AI
     1: 0   # User
@@ -115,7 +115,7 @@ model_id = "openai/whisper-large-v3-turbo"
 # Whisper
 whisper_model = AutoModelForSpeechSeq2Seq.from_pretrained(
     model_id, torch_dtype=torch.float16, low_cpu_mem_usage=True, use_safetensors=True
-)            
+)
 whisper_model.to("cuda")
 processor = AutoProcessor.from_pretrained(model_id)
 whisper_pipe = pipeline(
@@ -144,7 +144,7 @@ def load_reference_segments(config_data: CompanionConfig):
     """Load multiple reference clips for voice‑cloning."""
     global reference_segments
     reference_segments = []
-    
+
     # Load primary reference (required)
     if os.path.isfile(config_data.reference_audio_path):
         logger.info(f"Loading primary reference audio: {config_data.reference_audio_path}")
@@ -157,7 +157,7 @@ def load_reference_segments(config_data: CompanionConfig):
                                   audio=wav))
     else:
         logger.warning(f"Primary reference audio '{config_data.reference_audio_path}' not found.")
-    
+
     # Load second reference (optional)
     if config_data.reference_audio_path2 and os.path.isfile(config_data.reference_audio_path2):
         logger.info(f"Loading second reference audio: {config_data.reference_audio_path2}")
@@ -168,7 +168,7 @@ def load_reference_segments(config_data: CompanionConfig):
         reference_segments.append(Segment(text=config_data.reference_text2,
                                   speaker=config_data.voice_speaker_id,
                                   audio=wav))
-    
+
     # Load third reference (optional)
     if config_data.reference_audio_path3 and os.path.isfile(config_data.reference_audio_path3):
         logger.info(f"Loading third reference audio: {config_data.reference_audio_path3}")
@@ -179,7 +179,7 @@ def load_reference_segments(config_data: CompanionConfig):
         reference_segments.append(Segment(text=config_data.reference_text3,
                                   speaker=config_data.voice_speaker_id,
                                   audio=wav))
-    
+
     logger.info(f"Loaded {len(reference_segments)} reference audio segments.")
 
 def transcribe_audio(audio_data, sample_rate):
@@ -193,14 +193,14 @@ def transcribe_audio(audio_data, sample_rate):
         except: pass
     try:
         with torch.jit.optimized_execution(False):
-            result = whisper_pipe(audio_np, generate_kwargs={"language": "english"}) 
+            result = whisper_pipe(audio_np, generate_kwargs={"language": "english"})
             return result["text"]
     except:
         return "[Transcription error]"
 
 def initialize_models(config_data: CompanionConfig):
     global generator, llm, rag, vad_processor, config
-    config = config_data                         
+    config = config_data
 
     logger.info("Loading LLM …")
     llm = LLMInterface(config_data.llm_path,
@@ -285,7 +285,7 @@ def on_speech_end(audio_data, sample_rate):
             message_queue.put({"type": "transcription", "text": user_text}),
             loop
         )
-        
+
         threading.Thread(target=lambda: process_user_input(user_text, session_id), daemon=True).start()
     except Exception as e:
         logger.error(f"VAD callback failed: {e}")
@@ -296,43 +296,43 @@ def process_pending_inputs():
     time.sleep(0.2)
     is_speaking = False
     interrupt_flag.clear()
-    
+
     with user_input_lock:
         if not pending_user_inputs:
             logger.info("No pending user inputs to process")
             return
-        
+
         # Only take the most recent input and ignore others
         latest_input = pending_user_inputs[-1]
         logger.info(f"Processing only latest input: '{latest_input[0]}'")
-        
+
         # Clear all pending inputs
         pending_user_inputs = []
-        
+
         # Process only the latest input
         user_text, session_id = latest_input
         process_user_input(user_text, session_id)
 
 def process_user_input(user_text, session_id="default"):
     global config, is_speaking, pending_user_inputs, interrupt_flag
-    
+
     # Skip empty messages
     if not user_text or user_text.strip() == "":
         logger.warning("Empty user input received, ignoring")
         return
-    
+
     interrupt_flag.clear()
     is_speaking = False
-    
+
     # Check if we're currently supposed to be speaking
     if is_speaking:
         logger.info(f"AI is currently speaking, adding input to pending queue: '{user_text}'")
-        
+
         with user_input_lock:
             # Only keep the most recent input, replacing any existing ones
             pending_user_inputs = [(user_text, session_id)]
             logger.info(f"Added user input as the only pending input: '{user_text}'")
-        
+
         # Request interruption if not already interrupted
         if not interrupt_flag.is_set():
             logger.info("Automatically interrupting current speech for new input")
@@ -342,17 +342,17 @@ def process_user_input(user_text, session_id="default"):
                 message_queue.put({"type": "audio_status", "status": "interrupted"}),
                 loop
             )
-            
+
             # Allow a short delay before processing the new input
             time.sleep(0.3)
-            
+
             # Process the pending input after interruption
             process_pending_inputs()
-        
+
         return
-    
+
     interrupt_flag.clear()
-    
+
     # Normal processing continues...
     logger.info(f"Processing user input: '{user_text}'")
     context = "\n".join([f"User: {msg['user']}\nAI: {msg['ai']}" for msg in conversation_history[-5:]])
@@ -366,18 +366,18 @@ def process_user_input(user_text, session_id="default"):
         message_queue.put({"type": "status", "message": "Thinking..."}),
         loop
     )
-    
+
     try:
-        with llm_lock: 
+        with llm_lock:
             ai_response = llm.generate_response(system_prompt, user_text, context)
-        
+
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         conversation_history.append({
             "timestamp": timestamp,
             "user": user_text,
             "ai": ai_response
         })
-        
+
         try:
             db = SessionLocal()
             conv = Conversation(
@@ -397,17 +397,17 @@ def process_user_input(user_text, session_id="default"):
             db.close()
         except Exception as e:
             logger.error(f"Database error: {e}")
-        
+
         threading.Thread(target=lambda: rag.add_conversation(user_text, ai_response), daemon=True).start()
-        
+
         asyncio.run_coroutine_threadsafe(
             message_queue.put({"type": "audio_status", "status": "preparing"}),
             loop
         )
-        
+
         # Small delay to ensure client is ready
         time.sleep(0.2)
-        
+
         # Send the response to clients
         asyncio.run_coroutine_threadsafe(
             message_queue.put({"type": "response", "text": ai_response}),
@@ -415,16 +415,16 @@ def process_user_input(user_text, session_id="default"):
         )
 
         time.sleep(0.5)
-        
+
         if is_speaking:
             logger.warning("Still speaking when trying to start new audio - forcing interrupt")
             interrupt_flag.set()
             is_speaking = False
             time.sleep(0.5)  # Give time for cleanup
-        
+
         interrupt_flag.clear()  # Make absolutely sure
         is_speaking = False    # Reset for audio thread to take over
-        
+
         # Start audio generation in a new thread
         threading.Thread(target=audio_generation_thread, args=(ai_response, output_file), daemon=True).start()
 
@@ -482,7 +482,7 @@ def start_model_thread():
     global model_thread, model_thread_running
 
     if model_thread is not None and model_thread.is_alive():
-        return                        
+        return
 
     model_thread_running.set()
     model_thread = threading.Thread(target=model_worker,
@@ -522,7 +522,7 @@ MAX_AUDIO_FILES = 8
 def save_audio_and_trim(path, session_id, speaker_id, tensor, sample_rate):
     """
     Save audio file and trim old audio files for both AI and user to maintain storage limits.
-    
+
     Args:
         path: Path to save the audio file
         session_id: Conversation session ID
@@ -531,16 +531,16 @@ def save_audio_and_trim(path, session_id, speaker_id, tensor, sample_rate):
         sample_rate: Audio sample rate
     """
     torchaudio.save(path, tensor.unsqueeze(0), sample_rate)
-    
+
     saved_audio_paths.setdefault(session_id, {}).setdefault(speaker_id, []).append(path)
-    
+
     paths = saved_audio_paths[session_id][speaker_id]
     while len(paths) > MAX_AUDIO_FILES:
         old_path = paths.pop(0)
         if os.path.exists(old_path):
             os.remove(old_path)
             logger.info(f"Removed old audio file: {old_path}")
-    
+
     other_speaker_id = 1 if speaker_id == 0 else 0
     if other_speaker_id in saved_audio_paths[session_id]:
         other_paths = saved_audio_paths[session_id][other_speaker_id]
@@ -556,46 +556,46 @@ def add_segment(text, speaker_id, audio_tensor):
     """
     Add a new segment and ensure the total context stays within token limits.
     Preserves the original reference segments when trimming.
-    
+
     Args:
         text: Text content of the segment
         speaker_id: ID of the speaker (0 for AI, 1 for user)
         audio_tensor: Audio data as a tensor
     """
     global reference_segments, generator, config
-    
+
     # Count how many original reference segments we have (1-3)
     num_reference_segments = 1  # We always have at least the primary reference
     if hasattr(config, 'reference_audio_path2') and config.reference_audio_path2:
         num_reference_segments += 1
     if hasattr(config, 'reference_audio_path3') and config.reference_audio_path3:
         num_reference_segments += 1
-    
+
     # Add the new segment
     new_segment = Segment(text=text, speaker=speaker_id, audio=audio_tensor)
-    
+
     # Keep original reference segments protected from trimming
     protected_segments = reference_segments[:num_reference_segments] if len(reference_segments) >= num_reference_segments else reference_segments.copy()
-    
+
     # Dynamic segments that can be trimmed
     dynamic_segments = reference_segments[num_reference_segments:] if len(reference_segments) > num_reference_segments else []
     dynamic_segments.append(new_segment)
-    
+
     # First trim by MAX_SEGMENTS if needed, but never trim protected segments
     while len(protected_segments) + len(dynamic_segments) > MAX_SEGMENTS:
         if dynamic_segments:
             dynamic_segments.pop(0)  # Remove the oldest non-protected segment
         else:
             break  # Safety check - shouldn't happen
-    
+
     # Combine protected and dynamic segments
     reference_segments = protected_segments + dynamic_segments
-    
+
     # Then check and trim by token count
     # We need to access the model's tokenizer to properly count tokens
     if hasattr(generator, '_text_tokenizer'):
         total_tokens = 0
-        
+
         # Count tokens in all segments
         for segment in reference_segments:
             tokens = generator._text_tokenizer.encode(f"[{segment.speaker}]{segment.text}")
@@ -603,51 +603,51 @@ def add_segment(text, speaker_id, audio_tensor):
             if segment.audio is not None:
                 audio_frames = segment.audio.size(0) // 285  # Approximate frame count
                 total_tokens += audio_frames
-        
+
         # Remove oldest dynamic segments until we're under the token limit
         # but never remove protected segments
         while dynamic_segments and total_tokens > 2048:
             removed = dynamic_segments.pop(0)
             reference_segments.remove(removed)
-            
+
             # Recalculate tokens for the removed segment
             removed_tokens = len(generator._text_tokenizer.encode(f"[{removed.speaker}]{removed.text}"))
             if removed.audio is not None:
                 removed_audio_frames = removed.audio.size(0) // 285
                 removed_tokens += removed_audio_frames
             total_tokens -= removed_tokens
-            
+
         logger.info(f"Segments: {len(reference_segments)} " +
                     f"({len(protected_segments)} protected, {len(dynamic_segments)} dynamic), " +
                     f"total tokens: {total_tokens}/2048")
     else:
         # Fallback if we can't access the tokenizer - make a rough estimate
         logger.warning("Unable to access tokenizer - falling back to word-based estimation")
-        
+
         def estimate_tokens(segment):
             # Rough token estimation based on words and punctuation
             words = segment.text.split()
             punctuation = sum(1 for char in segment.text if char in ".,!?;:\"'()[]{}")
             text_tokens = len(words) + punctuation
-            
+
             # Estimate audio tokens
             audio_tokens = 0
             if segment.audio is not None:
                 audio_frames = segment.audio.size(0) // 300  # Approximate frame count
                 audio_tokens = audio_frames
-                
+
             return text_tokens + audio_tokens
-        
+
         # Calculate total token count
         total_estimated_tokens = sum(estimate_tokens(segment) for segment in reference_segments)
-        
+
         # Remove oldest dynamic segments until we're under the token limit
         while dynamic_segments and total_estimated_tokens > 2048:
             removed = dynamic_segments.pop(0)
             idx = reference_segments.index(removed)
             reference_segments.pop(idx)
             total_estimated_tokens -= estimate_tokens(removed)
-            
+
         logger.info(f"Segments: {len(reference_segments)} " +
                     f"({len(protected_segments)} protected, {len(dynamic_segments)} dynamic), " +
                     f"estimated tokens: {total_estimated_tokens}/2048")
@@ -674,76 +674,76 @@ def preprocess_text_for_tts(text):
 
 def audio_generation_thread(text, output_file):
     global is_speaking, interrupt_flag, audio_queue, model_thread_running, current_generation_id, speaking_start_time
-    
+
     current_generation_id += 1
     this_id = current_generation_id
-    
+
     interrupt_flag.clear()
-    
+
     # Log the start of generation
     logger.info(f"Starting audio generation for ID: {this_id}")
-    
+
     # Try to acquire the lock, but don't block if it's busy
     if not audio_gen_lock.acquire(blocking=False):
         logger.warning(f"Audio generation {this_id} - lock acquisition failed, another generation is in progress")
         asyncio.run_coroutine_threadsafe(
             message_queue.put({
-                "type": "error", 
+                "type": "error",
                 "message": "Audio generation busy, skipping synthesis",
                 "gen_id": this_id
             }),
             loop
         )
         return
-    
+
     try:
         # Start the model thread if it's not already running
         start_model_thread()
-        
+
         interrupt_flag.clear()
         is_speaking = True
         speaking_start_time = time.time()
-        
+
         # Create output directory
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
         all_audio_chunks = []
-        
+
         # Prepare text
         text_lower = text.lower()
         text_lower = preprocess_text_for_tts(text_lower)
-        
+
         asyncio.run_coroutine_threadsafe(
             message_queue.put({
-                "type": "audio_status", 
+                "type": "audio_status",
                 "status": "preparing_generation",
                 "gen_id": this_id
             }),
             loop
         )
-        
+
         # Give client a moment to process
         time.sleep(0.2)
-        
+
         logger.info(f"Sending generating status with ID {this_id}")
         asyncio.run_coroutine_threadsafe(
             message_queue.put({
-                "type": "audio_status", 
+                "type": "audio_status",
                 "status": "generating",
                 "gen_id": this_id  # Include generation ID
             }),
             loop
         )
-        
+
         # Small delay to ensure client gets the signal
         time.sleep(0.2)
-        
+
         # Estimate audio length
         words = text.split()
         avg_wpm = 100
         words_per_second = avg_wpm / 60
         estimated_seconds = len(words) / words_per_second
         max_audio_length_ms = int(estimated_seconds * 1000)
-        
+
         # Send request to model thread
         logger.info(f"Audio generation {this_id} - sending request to model thread")
         model_queue.put((
@@ -754,72 +754,72 @@ def audio_generation_thread(text, output_file):
             0.8,  # temperature
             50    # topk
         ))
-        
+
         # Start timing
         generation_start = time.time()
         chunk_counter = 0
-        
+
         # Process results as they come
         while True:
             try:
                 # Check for interruption FIRST before getting more results
                 if interrupt_flag.is_set():
                     logger.info(f"Audio generation {this_id} - interrupt detected, stopping")
-                    
+
                     # Signal model thread to exit and restart
                     model_thread_running.clear()
                     time.sleep(0.1)
                     model_thread_running.set()
                     start_model_thread()
-                    
+
                     # Clear any remaining items in the result queue
                     while not model_result_queue.empty():
                         try:
                             model_result_queue.get_nowait()
                         except queue.Empty:
                             pass
-                    
+
                     # Break out of the processing loop
                     break
-                
+
                 # Get result with timeout to allow checking interrupt
                 result = model_result_queue.get(timeout=0.1)
-                
+
                 # Check for end of generation or error
                 if result is None:
                     logger.info(f"Audio generation {this_id} - complete")
                     break
-                    
+
                 if isinstance(result, Exception):
                     logger.error(f"Audio generation {this_id} - error: {result}")
                     raise result
-                
+
                 # Track timing for first chunk
                 if chunk_counter == 0:
                     first_chunk_time = time.time() - generation_start
                     logger.info(f"Audio generation {this_id} - first chunk latency: {first_chunk_time*1000:.1f}ms")
-                
+
                 chunk_counter += 1
-                
+
                 # One more interrupt check before processing chunk
                 if interrupt_flag.is_set():
                     logger.info(f"Audio generation {this_id} - interrupt flag set during chunk processing")
                     break
-                
+
                 # Process this audio chunk
                 audio_chunk = result
                 all_audio_chunks.append(audio_chunk)
-                
+
                 # Convert to numpy and send to audio queue
                 chunk_array = audio_chunk.cpu().numpy().astype(np.float32)
                 audio_queue.put(chunk_array)
-                
+
                 if chunk_counter == 1:
                     logger.info(f"Sending first audio chunk with ID {this_id}")
                     # Notify client we're sending the first chunk
                     asyncio.run_coroutine_threadsafe(
                         message_queue.put({
-                            "type": "audio_status", 
+                            "type": "audio_status",
                             "status": "first_chunk",
                             "gen_id": this_id
                         }),
@@ -827,7 +827,7 @@ def audio_generation_thread(text, output_file):
                     )
                     # Small delay
                     time.sleep(0.1)
-                
+
                 # Send chunk with generation ID
                 asyncio.run_coroutine_threadsafe(
                     message_queue.put({
@@ -839,21 +839,21 @@ def audio_generation_thread(text, output_file):
                     }),
                     loop
                 )
-                
+
             except queue.Empty:
                 # No results yet, keep checking
                 continue
             except Exception as e:
                 logger.error(f"Audio generation {this_id} - error processing result: {e}")
                 break
-        
+
         # Save complete audio if available
         if all_audio_chunks and not interrupt_flag.is_set():
             try:
                 complete_audio = torch.cat(all_audio_chunks)
                 save_audio_and_trim(output_file, "default", config.voice_speaker_id, complete_audio, generator.sample_rate)
                 add_segment(text.lower(), config.voice_speaker_id, complete_audio)
-                
+
                 # Log statistics
                 total_time = time.time() - generation_start
                 total_audio_seconds = complete_audio.size(0) / generator.sample_rate
@@ -861,21 +861,21 @@ def audio_generation_thread(text, output_file):
                 logger.info(f"Audio generation {this_id} - completed in {total_time:.2f}s, RTF: {rtf:.2f}x")
             except Exception as e:
                 logger.error(f"Audio generation {this_id} - error saving complete audio: {e}")
-                
+
     except Exception as e:
         import traceback
         logger.error(f"Audio generation {this_id} - unexpected error: {e}\n{traceback.format_exc()}")
     finally:
         is_speaking = False
-        
+
         # Signal end of audio
         audio_queue.put(None)
-        
+
         try:
             logger.info(f"Audio generation {this_id} - sending completion status")
             asyncio.run_coroutine_threadsafe(
                 message_queue.put({
-                    "type": "audio_status", 
+                    "type": "audio_status",
                     "status": "complete",
                     "gen_id": this_id
                 }),
@@ -883,28 +883,28 @@ def audio_generation_thread(text, output_file):
             )
         except Exception as e:
             logger.error(f"Audio generation {this_id} - failed to send completion status: {e}")
-            
+
         # Process any pending inputs
         with user_input_lock:
             if pending_user_inputs:
                 # Process pending inputs
                 logger.info(f"Audio generation {this_id} - processing pending inputs")
                 process_pending_inputs()
-            
+
         # Release the lock
         logger.info(f"Audio generation {this_id} - releasing lock")
         audio_gen_lock.release()
-    
+
 def handle_interrupt(websocket):
     global is_speaking, last_interrupt_time, interrupt_flag, model_thread_running, speaking_start_time
-    
+
     # Log the current state
     logger.info(f"Interrupt requested. Current state: is_speaking={is_speaking}")
-    
+
     current_time = time.time()
     time_since_speech_start = current_time - speaking_start_time if speaking_start_time > 0 else 999
     time_since_last_interrupt = current_time - last_interrupt_time
-    
+
     # Only apply cooldown for established speech, not for new speech
     if time_since_last_interrupt < interrupt_cooldown and time_since_speech_start > 3.0:
         logger.info(f"Ignoring interrupt: too soon after previous interrupt ({time_since_last_interrupt:.1f}s < {interrupt_cooldown}s)")
@@ -919,22 +919,22 @@ def handle_interrupt(websocket):
            loop
         )
         return False
-    
+
     # Update the last interrupt time
     last_interrupt_time = current_time
-    
+
     # We should interrupt if we're speaking OR if model generation is in progress
     if is_speaking or not model_result_queue.empty():
         logger.info("Interruption processing: we are speaking or generating")
-        
+
         interrupt_flag.set()
-        
+
         # Notify clients
         asyncio.run_coroutine_threadsafe(
             message_queue.put({"type": "audio_status", "status": "interrupted"}),
             loop
         )
-        
+
         asyncio.run_coroutine_threadsafe(
            websocket.send_json({
                "type": "audio_status",
@@ -942,7 +942,7 @@ def handle_interrupt(websocket):
            }),
            loop
         )
-        
+
         # Clear the audio queue to stop additional audio from being processed
         try:
             # Drain the existing queue
@@ -951,13 +951,13 @@ def handle_interrupt(websocket):
                     audio_queue.get_nowait()
                 except queue.Empty:
                     break
-                    
+
             # Add end signal
             audio_queue.put(None)
             logger.info("Audio queue cleared")
         except Exception as e:
             logger.error(f"Error clearing audio queue: {e}")
-        
+
         # Reset VAD to prepare for new input
         if vad_processor:
             try:
@@ -965,50 +965,50 @@ def handle_interrupt(websocket):
                 logger.info("VAD processor reset")
             except Exception as e:
                 logger.error(f"Error resetting VAD: {e}")
-        
+
         # Stop current model worker if needed
         if model_thread and model_thread.is_alive():
             try:
                 # Clear the thread running flag to stop generation
                 model_thread_running.clear()
-                
+
                 # Wait a brief moment for thread to notice and exit
                 time.sleep(0.1)
-                
+
                 # Now restart the thread state flag
                 model_thread_running.set()
-                
+
                 # And restart the thread
                 start_model_thread()
                 logger.info("Model thread restarted")
             except Exception as e:
                 logger.error(f"Error restarting model thread: {e}")
-        
+
         return True
-    
+
     logger.info("No active speech to interrupt")
     return False
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     global is_speaking, audio_queue
-    
+
     await websocket.accept()
     active_connections.append(websocket)
-    
+
     saved = config_manager.load_config()
     if saved:
         await websocket.send_json({"type": "saved_config", "config": saved})
-        
+
     try:
         while True:
             data = await websocket.receive_json()
-            
+
             if data["type"] == "config":
                 # Config handling
                 try:
                     config_data = data["config"]
-                    
+
                     logger.info(f"Received config data keys: {config_data.keys()}")
 
                     for key in ["reference_audio_path", "reference_audio_path2", "reference_audio_path3",
@@ -1017,26 +1017,26 @@ async def websocket_endpoint(websocket: WebSocket):
                             logger.info(f"Config includes {key}: {config_data[key]}")
                         else:
                             logger.warning(f"Config missing {key}")
-                    
+
                     conf = CompanionConfig(**config_data)
-                    
+
                     saved = config_manager.save_config(config_data)
-                    
+
                     if saved:
                         initialize_models(conf)
                         await websocket.send_json({"type": "status", "message": "Models initialized and configuration saved"})
                     else:
                         await websocket.send_json({"type": "error", "message": "Failed to save configuration"})
-                        
+
                 except Exception as e:
                     logger.error(f"Error processing config: {str(e)}")
                     await websocket.send_json({"type": "error", "message": f"Configuration error: {str(e)}"})
-                
-                
+
+
             elif data["type"] == "request_saved_config":
                 saved = config_manager.load_config()
                 await websocket.send_json({"type": "saved_config", "config": saved})
-            
+
             elif data["type"] == "text_message":
                 user_text   = data["text"]
                 session_id  = data.get("session_id", "default")
@@ -1050,13 +1050,13 @@ async def websocket_endpoint(websocket: WebSocket):
                         pending_user_inputs.append((user_text, session_id))
                     await websocket.send_json(
                         {"type":"status","message":"Queued – I’ll answer in a moment"})
-                    continue                         
+                    continue
 
                 await message_queue.put({"type":"transcription","text":user_text})
                 threading.Thread(
                     target=lambda: process_user_input(user_text, session_id),
                     daemon=True).start()
-                
+
             elif data["type"] == "audio":
                 audio_data = np.asarray(data["audio"], dtype=np.float32)
                 sample_rate = data["sample_rate"]
@@ -1070,7 +1070,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     sample_rate = 16000
 
                 if config and config.vad_enabled:
-                    vad_processor.process_audio(audio_data)  
+                    vad_processor.process_audio(audio_data)
                 else:
                     text = transcribe_audio(audio_data, sample_rate)
                     await websocket.send_json({"type": "transcription", "text": text})
@@ -1082,47 +1082,47 @@ async def websocket_endpoint(websocket: WebSocket):
                     else:
                         process_user_input(text)
 
-                        
+
             elif data["type"] == "interrupt":
                 logger.info("Explicit interrupt request received")
-                
+
                 # Always acknowledge receipt of interrupt request
                 await websocket.send_json({
-                    "type": "audio_status", 
+                    "type": "audio_status",
                     "status": "interrupt_acknowledged"
                 })
-                
+
                 # Then try to handle the actual interrupt
                 success = handle_interrupt(websocket)
-                
+
                 # If successful, allow a brief delay for clearing everything
                 if success:
                     await asyncio.sleep(0.3)  # Short delay to allow complete clearing
-                    
+
                     # Force process pending inputs after interrupt
                     with user_input_lock:
                         if pending_user_inputs:
                             user_text, session_id = pending_user_inputs.pop(0)
                             pending_user_inputs.clear()  # Clear any backup to avoid multiple responses
-                            
+
                             # Process in a new thread to avoid blocking
                             threading.Thread(
                                 target=lambda: process_user_input(user_text, session_id),
                                 daemon=True
                             ).start()
-                
+
                 # Send final status update about the interrupt
                 await websocket.send_json({
-                    "type": "audio_status", 
+                    "type": "audio_status",
                     "status": "interrupted",
                     "success": success
                 })
-                
+
             elif data["type"] == "mute":
                 await websocket.send_json({"type": "mute_status", "muted": data["muted"]})
                 if not data["muted"] and config and config.vad_enabled:
                     vad_processor.reset()
-                    
+
     except WebSocketDisconnect:
         if websocket in active_connections:
             active_connections.remove(websocket)

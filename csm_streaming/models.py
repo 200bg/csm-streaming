@@ -195,4 +195,4 @@ class Model(
         )
 
         return torch.cat([audio_embeds, text_embeds], dim=-2)
-    
+
